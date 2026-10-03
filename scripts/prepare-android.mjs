@@ -1,8 +1,8 @@
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const workspace = resolve(process.argv[2] ?? ".");
+const patchOnly = process.argv.includes("--patch");
 const vitePath = join(workspace, "vite.config.ts");
 const vite = await readFile(vitePath, "utf8");
 
@@ -22,14 +22,15 @@ if (!vite.includes("process.env.SAHMBAN_ANDROID")) {
   await writeFile(vitePath, patched);
 }
 
-// TanStack Start SPA mode emits a static shell rather than a conventional index.html.
-// Capacitor needs an index.html entry point, so copy the generated static tree and rename
-// the shell. The search is deliberately recursive because output layout can change between
-// TanStack/Nitro versions.
+if (patchOnly) {
+  console.log("Android build configuration patched.");
+  process.exit(0);
+}
+
 async function findFile(dir, filename) {
   const { readdir } = await import("node:fs/promises");
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (entry.name === "node_modules" || entry.name === ".git") continue;
+    if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "android") continue;
     const p = join(dir, entry.name);
     if (entry.isFile() && entry.name === filename) return p;
     if (entry.isDirectory()) {
@@ -49,9 +50,7 @@ await mkdir(webDir, { recursive: true });
 await cp(staticRoot, webDir, { recursive: true, force: true });
 await cp(shell, join(webDir, "index.html"));
 
-// Capacitor's config is intentionally generated here so the source workspace remains
-// deployable as a normal web app while the Android build is deterministic.
-const config = `import type { CapacitorConfig } from "@capacitor/cli";\n\nconst config: CapacitorConfig = {\n  appId: "ir.sahmban.app",\n  appName: "سهم‌بان",\n  webDir: "android-web",\n  bundledWebRuntime: false,\n  server: { cleartext: true },\n};\n\nexport default config;\n`;
+const config = `import type { CapacitorConfig } from "@capacitor/cli";\n\nconst config: CapacitorConfig = {\n  appId: "ir.sahmban.app",\n  appName: "سهم‌بان",\n  webDir: "android-web",\n  bundledWebRuntime: false,\n};\n\nexport default config;\n`;
 await writeFile(join(workspace, "capacitor.config.ts"), config);
 
 console.log(`Android web bundle prepared from ${staticRoot}`);
