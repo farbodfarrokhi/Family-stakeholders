@@ -31,8 +31,12 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify preinstalled Android SDK
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          ls -la "${ANDROID_HOME:-${ANDROID_SDK_ROOT}}" | head
 
       - name: Extract workspace
         shell: bash
@@ -81,7 +85,7 @@ jobs:
           import type { CapacitorConfig } from '@capacitor/cli';
 
           const config: CapacitorConfig = {
-            appId: 'com.sahmban.app',
+            appId: 'ir.sahmban.app',
             appName: 'سهم‌بان',
             webDir: '.output/public',
             bundledWebRuntime: false,
