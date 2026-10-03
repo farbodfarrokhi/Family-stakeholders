@@ -1,0 +1,157 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22
+  CAPACITOR_MAJOR: 8
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract workspace
+        shell: bash
+        run: |
+          rm -rf app
+          mkdir app
+          unzip -q grok-workspace.zip -d app
+          test -f app/package.json
+
+      - name: Prepare Android build workspace
+        working-directory: app
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.scripts = {
+            ...pkg.scripts,
+            'build:android': 'CAPACITOR_BUILD=true node scripts/with-app-env.mjs vite build && node scripts/prepare-capacitor.mjs'
+          };
+          pkg.dependencies = {
+            ...pkg.dependencies,
+            '@capacitor/core': '^8.0.0'
+          };
+          pkg.devDependencies = {
+            ...pkg.devDependencies,
+            '@capacitor/cli': '^8.0.0',
+            '@capacitor/android': '^8.0.0'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          NODE
+
+          node <<'NODE'
+          const fs = require('node:fs');
+          let s = fs.readFileSync('vite.config.ts', 'utf8');
+          const needle = 'tanstackStart(),';
+          const replacement = 'tanstackStart({ spa: { enabled: process.env.CAPACITOR_BUILD === "true" } }),';
+          if (!s.includes(replacement)) {
+            if (!s.includes(needle)) throw new Error('Could not find tanstackStart() in vite.config.ts');
+            s = s.replace(needle, replacement);
+            fs.writeFileSync('vite.config.ts', s);
+          }
+          NODE
+
+          cat > capacitor.config.ts <<'EOF'
+          import type { CapacitorConfig } from '@capacitor/cli';
+
+          const config: CapacitorConfig = {
+            appId: 'com.sahmban.app',
+            appName: 'سهم‌بان',
+            webDir: '.output/public',
+            bundledWebRuntime: false,
+          };
+
+          export default config;
+          EOF
+
+          cat > scripts/prepare-capacitor.mjs <<'NODE'
+          import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+          import { join } from 'node:path';
+
+          const publicDir = join(process.cwd(), '.output', 'public');
+          const shell = join(publicDir, '_shell.html');
+          const index = join(publicDir, 'index.html');
+
+          if (!existsSync(shell)) {
+            throw new Error(`TanStack Start SPA shell not found: ${shell}`);
+          }
+          mkdirSync(publicDir, { recursive: true });
+          copyFileSync(shell, index);
+          console.log(`Prepared Capacitor entrypoint: ${index}`);
+          NODE
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: app
+        run: npm run typecheck
+
+      - name: Unit tests
+        working-directory: app
+        run: npm run test
+
+      - name: Lint
+        working-directory: app
+        run: npm run lint
+
+      - name: Build web shell for Android
+        working-directory: app
+        run: npm run build:android
+
+      - name: Add Capacitor Android project
+        working-directory: app
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        working-directory: app
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: app/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sahmban-debug-apk
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Android project for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: sahmban-android-project
+          path: app/android
+          if-no-files-found: error
+          retention-days: 7
