@@ -1,73 +1,144 @@
 name: Android APK
+
 on:
   push:
     branches: [main, android]
   workflow_dispatch:
+
 permissions:
   contents: read
+
 env:
   NODE_VERSION: 22
+
 jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 35
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
-        with: { node-version: ${{ env.NODE_VERSION }} }
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
       - name: Setup Java
         uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21' }
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: Verify Android SDK
-        run: test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+        shell: bash
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+
       - name: Extract workspace
-        run: rm -rf app && mkdir app && unzip -q grok-workspace.zip -d app && test -f app/package.json
+        shell: bash
+        run: |
+          rm -rf app
+          mkdir app
+          unzip -q grok-workspace.zip -d app
+          test -f app/package.json
+
       - name: Prepare Android build workspace
         working-directory: app
+        shell: bash
         run: |
-          node - <<'NODE'
-          const fs=require('node:fs');
-          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
-          pkg.scripts={...pkg.scripts,'build:android':'CAPACITOR_BUILD=true node scripts/with-app-env.mjs vite build && node scripts/prepare-capacitor.mjs'};
-          pkg.dependencies={...pkg.dependencies,'@capacitor/core':'^8.0.0'};
-          pkg.devDependencies={...pkg.devDependencies,'@capacitor/cli':'^8.0.0','@capacitor/android':'^8.0.0'};
-          fs.writeFileSync('package.json',JSON.stringify(pkg,null,2)+'\n');
-          let s=fs.readFileSync('vite.config.ts','utf8');
-          if(!s.includes('spa: { enabled: process.env.CAPACITOR_BUILD === "true" }')) s=s.replace('tanstackStart(),','tanstackStart({ spa: { enabled: process.env.CAPACITOR_BUILD === "true" } }),');
-          fs.writeFileSync('vite.config.ts',s);
-          let p=fs.readFileSync('scripts/grok-pwa-shared.mjs','utf8');
-          const old='const fromSite = String(site.title ?? "").trim();\n  if (fromSite) return fromSite;\n  const fromDoc = String(documentTitle ?? "").trim();\n  if (fromDoc) return fromDoc;';
-          const neu='const fromDoc = String(documentTitle ?? "").trim();\n  if (fromDoc) return fromDoc;\n  const fromSite = String(site.title ?? "").trim();\n  if (fromSite) return fromSite;';
-          if(p.includes(old)) fs.writeFileSync('scripts/grok-pwa-shared.mjs',p.replace(old,neu));
-          fs.writeFileSync('capacitor.config.ts','import type { CapacitorConfig } from "@capacitor/cli";\nconst config: CapacitorConfig={appId:"ir.sahmban.app",appName:"سهم‌بان",webDir:".output/public",bundledWebRuntime:false};\nexport default config;\n');
-          fs.writeFileSync('scripts/prepare-capacitor.mjs','import { copyFileSync, existsSync, mkdirSync } from "node:fs"; import { join } from "node:path"; const d=join(process.cwd(),".output","public"),s=join(d,"_shell.html"),i=join(d,"index.html"); if(!existsSync(s)) throw new Error(`TanStack Start SPA shell not found: ${s}`); mkdirSync(d,{recursive:true}); copyFileSync(s,i);\n');
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.scripts = {
+            ...pkg.scripts,
+            'build:android': 'CAPACITOR_BUILD=true node scripts/with-app-env.mjs vite build && node scripts/prepare-capacitor.mjs'
+          };
+          pkg.dependencies = {
+            ...pkg.dependencies,
+            '@capacitor/core': '^8.0.0'
+          };
+          pkg.devDependencies = {
+            ...pkg.devDependencies,
+            '@capacitor/cli': '^8.0.0',
+            '@capacitor/android': '^8.0.0'
+          };
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+
+          let vite = fs.readFileSync('vite.config.ts', 'utf8');
+          const viteReplacement = 'tanstackStart({ spa: { enabled: process.env.CAPACITOR_BUILD === "true" } }),';
+          if (!vite.includes(viteReplacement)) {
+            if (!vite.includes('tanstackStart(),')) throw new Error('tanstackStart() was not found');
+            vite = vite.replace('tanstackStart(),', viteReplacement);
+            fs.writeFileSync('vite.config.ts', vite);
+          }
+
+          let shared = fs.readFileSync('scripts/grok-pwa-shared.mjs', 'utf8');
+          const oldTitleOrder = 'const fromSite = String(site.title ?? "").trim();\n  if (fromSite) return fromSite;\n  const fromDoc = String(documentTitle ?? "").trim();\n  if (fromDoc) return fromDoc;';
+          const newTitleOrder = 'const fromDoc = String(documentTitle ?? "").trim();\n  if (fromDoc) return fromDoc;\n  const fromSite = String(site.title ?? "").trim();\n  if (fromSite) return fromSite;';
+          if (shared.includes(oldTitleOrder)) {
+            fs.writeFileSync('scripts/grok-pwa-shared.mjs', shared.replace(oldTitleOrder, newTitleOrder));
+          }
+
+          fs.writeFileSync('capacitor.config.ts', `import type { CapacitorConfig } from "@capacitor/cli";
+
+const config: CapacitorConfig = {
+  appId: "ir.sahmban.app",
+  appName: "سهم‌بان",
+  webDir: ".output/public",
+  bundledWebRuntime: false,
+};
+
+export default config;
+`);
+
+          fs.writeFileSync('scripts/prepare-capacitor.mjs', `import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+
+const publicDir = join(process.cwd(), ".output", "public");
+const shell = join(publicDir, "_shell.html");
+const index = join(publicDir, "index.html");
+
+if (!existsSync(shell)) throw new Error(\`TanStack Start SPA shell not found: \${shell}\`);
+mkdirSync(publicDir, { recursive: true });
+copyFileSync(shell, index);
+`);
           NODE
+
       - name: Install dependencies
         working-directory: app
         run: npm install --no-audit --no-fund
+
       - name: Typecheck
         working-directory: app
         run: npm run typecheck
+
       - name: Unit tests
         working-directory: app
         run: npm run test
+
       - name: Lint
         working-directory: app
         run: npm run lint
+
       - name: Build web shell for Android
         working-directory: app
         run: npm run build:android
+
       - name: Add Capacitor Android project
         working-directory: app
         run: npx cap add android
+
       - name: Sync Capacitor
         working-directory: app
         run: npx cap sync android
+
       - name: Build debug APK
         working-directory: app/android
         run: ./gradlew assembleDebug --no-daemon --stacktrace
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
