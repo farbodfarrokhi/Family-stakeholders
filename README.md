@@ -1,6 +1,6 @@
 # سهم‌بان (Sahm-bân)
 
-اپلیکیشن مدیریت دارایی‌ها، تعهدات و حساب‌های مشترک میان چند نفر. این workspace منبع اصلی پروژه است و برای وب و بسته‌بندی Android با Capacitor آماده شده است.
+اپلیکیشن مدیریت دارایی‌ها، تعهدات و حساب‌های مشترک میان چند نفر. workspace اصلی پروژه در `grok-workspace.zip` نگه‌داری می‌شود و ساختار کلیدی پروژه نیز در ریپو قرار گرفته است.
 
 ## اجرای محلی
 
@@ -28,4 +28,6 @@ cd android
 ./gradlew assembleDebug
 ```
 
-فایل APK در `android/app/build/outputs/apk/debug/app-debug.apk` ایجاد می‌شود. GitHub Actions نیز همین مسیر را به‌صورت خودکار build و به‌عنوان artifact منتشر می‌کند.
+فایل APK در `android/app/build/outputs/apk/debug/app-debug.apk` ایجاد می‌شود. GitHub Actions همین مسیر را build و به‌عنوان artifact منتشر می‌کند.
+
+در CI، قبل از تست و build یک اصلاح سازگاری برای `grok-pwa-shared.mjs` اعمال می‌شود تا عنوان واقعی سند بر عنوان پیش‌فرض پلتفرم اولویت داشته باشد؛ این همان خطایی بود که باعث شکست ۶ تست و توقف build APK می‌شد.
