@@ -1,0 +1,94 @@
+name: Windows Desktop App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-desktop.yml"
+      - "grok-workspace.zip"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Extract source workspace
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force app | Out-Null
+          Expand-Archive -Path grok-workspace.zip -DestinationPath app -Force
+          if (!(Test-Path app/package.json)) { throw "package.json was not found inside grok-workspace.zip" }
+
+      - name: Configure static app build
+        working-directory: app
+        shell: pwsh
+        run: |
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));p.dependencies={...p.dependencies,"@capacitor/core":"^8.0.0"};p.devDependencies={...p.devDependencies,"@capacitor/cli":"^8.0.0","@capacitor/android":"^8.0.0","electron":"^37.0.0","electron-builder":"^26.0.0"};p.main="electron/main.cjs";p.scripts={...p.scripts,"build:desktop":"CAPACITOR_BUILD=true node scripts/with-app-env.mjs vite build && node scripts/prepare-capacitor.mjs","dist:windows":"npm run build:desktop && electron-builder --win nsis"};p.build={appId:"ir.sahmban.desktop",productName:"سهم‌بان",directories:{output:"release"},files:["electron/**/*",".output/public/**/*","package.json"],asar:true,win:{target:["nsis"],artifactName:"Sahmban-Setup-${version}.${ext}"},nsis:{oneClick:false,allowToChangeInstallationDirectory:true,createDesktopShortcut:true,createStartMenuShortcut:true,shortcutName:"سهم‌بان"}};fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")'
+          New-Item -ItemType Directory -Force electron | Out-Null
+          @'
+          const { app, BrowserWindow, shell } = require("electron");
+          const path = require("node:path");
+          function createWindow() {
+            const win = new BrowserWindow({
+              width: 1360, height: 900, minWidth: 960, minHeight: 640,
+              title: "سهم‌بان",
+              autoHideMenuBar: true,
+              backgroundColor: "#f7f7f5",
+              webPreferences: {
+                contextIsolation: true,
+                nodeIntegration: false,
+                sandbox: true
+              }
+            });
+            win.loadFile(path.join(__dirname, "..", ".output", "public", "index.html"));
+            win.webContents.setWindowOpenHandler(({ url }) => {
+              if (url.startsWith("https://") || url.startsWith("http://")) shell.openExternal(url);
+              return { action: "deny" };
+            });
+          }
+          app.whenReady().then(() => {
+            createWindow();
+            app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+          });
+          app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+          '@ | Set-Content -Encoding utf8 electron/main.cjs
+          @'
+          import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+          import { join } from "node:path";
+          const d = join(process.cwd(), ".output", "public");
+          const shell = join(d, "_shell.html");
+          const index = join(d, "index.html");
+          if (!existsSync(shell)) throw new Error("TanStack Start SPA shell not found: " + shell);
+          mkdirSync(d, { recursive: true });
+          copyFileSync(shell, index);
+          '@ | Set-Content -Encoding utf8 scripts/prepare-capacitor.mjs
+
+      - name: Install dependencies
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: Build Windows installer
+        working-directory: app
+        run: npm run dist:windows
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sahmban-Windows-Installer
+          path: app/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
